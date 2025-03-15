@@ -1,0 +1,57 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+    commands:
+      - pip install awscli
+      - curl -o terraform.zip https://releases.hashicorp.com/terraform/1.5.7/terraform_1.5.7_linux_amd64.zip
+      - unzip terraform.zip
+      - mv terraform /usr/local/bin/
+      - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+      - chmod +x ./kubectl
+      - mv ./kubectl /usr/local/bin/
+      
+  pre_build:
+    commands:
+      - echo "Logging into AWS ECR..."
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+      - echo "Configuring kubectl for EKS cluster..."
+      - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
+      
+  build:
+    commands:
+      - echo "Initializing Terraform..."
+      - terraform init
+      - echo "Validating Terraform configuration..."
+      - terraform validate
+      - echo "Planning Terraform deployment..."
+      - terraform plan -var-file=terraform.tfvars -out=tfplan
+      - echo "Applying Terraform changes..."
+      - terraform apply -auto-approve tfplan
+      
+  post_build:
+    commands:
+      - echo "Verifying deployment..."
+      - kubectl get namespaces
+      - kubectl get serviceaccounts -n $KUBERNETES_NAMESPACE
+      - kubectl get configmaps -n $KUBERNETES_NAMESPACE
+      - echo "Kubernetes resources successfully deployed!"
+
+artifacts:
+  files:
+    - tfplan
+    - terraform.tfstate
+    - .terraform.lock.hcl
+    
+cache:
+  paths:
+    - .terraform/**/*
+
+env:
+  variables:
+    KUBERNETES_NAMESPACE: "default"
+  parameter-store:
+    AWS_ACCOUNT_ID: "/devops-bootcamp/aws-account-id"
+    EKS_CLUSTER_NAME: "/devops-bootcamp/eks-cluster-name"

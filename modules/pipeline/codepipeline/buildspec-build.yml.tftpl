@@ -1,0 +1,75 @@
+version: 0.2
+
+env:
+  shell: bash
+  variables:
+    AWS_REGION: "${region}"
+  secrets-manager:
+    ACCESS_KEY: "${eks_user_secret_name}:access_key_id" 
+    SECRET_KEY: "${eks_user_secret_name}:secret_access_key"
+  exported-variables: ["imageTag"]
+
+phases:
+  install:
+    runtime-versions:
+      docker: 20
+    commands:
+      # Add kubectl for frontend builds
+      - |
+        if [ "${component_role}" = "frontend" ]; then
+          curl -o kubectl https://amazon-eks.s3.us-west-2.amazonaws.com/1.21.5/2022-01-21/bin/linux/amd64/kubectl
+          chmod +x ./kubectl
+          mv ./kubectl /usr/local/bin
+          kubectl version --short --client
+        fi
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws configure set aws_access_key_id $ACCESS_KEY
+      - aws configure set aws_secret_access_key $SECRET_KEY
+      - aws configure set region $AWS_REGION
+      - aws --version
+      - REPOSITORY_URI=${ecr_repository_url}
+      - aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin $(aws sts get-caller-identity --query Account --output text).dkr.ecr.${region}.amazonaws.com
+      # Add EKS authentication for frontend builds
+      - |
+        if [ "${component_role}" = "frontend" ]; then
+          aws eks update-kubeconfig --region ${region} --name ${eks_cluster_name}
+          kubectl get svc
+        fi
+  build:
+    commands:
+      - echo Build started on `date`
+      # Create .env file for frontend builds
+      - |
+        if [ "${component_role}" = "frontend" ]; then
+          echo "Detected frontend component - updating .env configuration"
+          BACKEND_URL=$(kubectl get svc cloudmart-backend-app-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          if [ -n "$BACKEND_URL" ]; then
+            echo "Found backend URL: $BACKEND_URL"
+            echo "VITE_API_BASE_URL=http://$BACKEND_URL:5000/api" > .env
+            cat .env
+          else
+            echo "Warning: Could not detect backend URL. Frontend will use the default configuration."
+          fi
+        fi
+      - echo Building the Docker image...
+      - docker build -t $REPOSITORY_URI:latest .
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION
+      - export imageTag=$CODEBUILD_RESOLVED_SOURCE_VERSION
+      - printf '[{"name":"cloudmart-app","imageUri":"%s"}]' $REPOSITORY_URI:$imageTag > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
+    - cloudmart-${component_role}.yaml
+    - appspec.yml
+    - scripts/**/*
+    - taskdef.json

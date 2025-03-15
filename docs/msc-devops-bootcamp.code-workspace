@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../msc-devops-bootcamp-frontend"
+		},
+		{
+			"path": "../../msc-devops-bootcamp-backend"
+		},
+		{
+			"path": "../../msc-devops-bootcamp-kubernetes"
+		}
+	],
+	"settings": {
+		"powershell.cwd": "msc-devops-bootcamp"
+	}
+}

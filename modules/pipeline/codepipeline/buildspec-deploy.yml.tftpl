@@ -1,0 +1,40 @@
+version: 0.2
+
+env:
+  shell: bash
+  variables:
+    AWS_REGION: "${region}"
+  secrets-manager:
+    ACCESS_KEY: "${eks_user_secret_name}:access_key_id"
+    SECRET_KEY: "${eks_user_secret_name}:secret_access_key"
+
+phases:
+  install:
+    runtime-versions:
+      docker: 20
+    commands:
+      - curl -o kubectl https://amazon-eks.s3.us-west-2.amazonaws.com/1.21.5/2022-01-21/bin/linux/amd64/kubectl
+      - chmod +x ./kubectl
+      - mv ./kubectl /usr/local/bin
+      - kubectl version --short --client
+  pre_build:
+    commands:
+      # Configure AWS CLI with credentials directly from environment variables
+      - aws configure set aws_access_key_id $ACCESS_KEY
+      - aws configure set aws_secret_access_key $SECRET_KEY
+      - aws configure set region $AWS_REGION
+      
+      # Authenticate with EKS with these credentials
+      - aws eks update-kubeconfig --region ${region} --name ${eks_cluster_name}
+      - kubectl get svc
+  build:
+    commands:
+      - echo Deployment started on `date`
+      - IMAGE_URI=$(jq -r '.[0].imageUri' imagedefinitions.json)
+      - echo $IMAGE_URI
+      - sed -i "s|CONTAINER_IMAGE|$IMAGE_URI|g" cloudmart-${component_role}.yaml
+  post_build:
+    commands:
+      - echo Applying Kubernetes manifests...
+      - kubectl apply -f cloudmart-${component_role}.yaml
+      - echo Deployment completed on `date`

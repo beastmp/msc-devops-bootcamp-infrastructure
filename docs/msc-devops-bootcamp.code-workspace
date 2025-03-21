@@ -14,6 +14,6 @@
 		}
 	],
 	"settings": {
-		"powershell.cwd": "msc-devops-bootcamp"
+		"powershell.cwd": "msc-devops-bootcamp-infrastructure"
 	}
 }
